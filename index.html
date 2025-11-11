@@ -853,6 +853,80 @@
         .undo-btn:hover {
             background: #f7f6f3;
         }
+
+        /* Version History Styles */
+        .version-item {
+            background: #f7f6f3;
+            border: 1px solid #e3e2df;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: all 0.15s ease;
+        }
+
+        .version-item:hover {
+            background: #f0f0ef;
+            border-color: #d1d0cd;
+        }
+
+        .version-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .version-timestamp {
+            font-size: 14px;
+            font-weight: 600;
+            color: #37352f;
+        }
+
+        .version-info {
+            font-size: 12px;
+            color: #6b6b6b;
+            margin-bottom: 12px;
+        }
+
+        .version-current {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #d1fae5;
+            color: #065f46;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-restore {
+            padding: 6px 12px;
+            background: #37352f;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .btn-restore:hover {
+            background: #2c2a26;
+        }
+
+        .btn-restore:disabled {
+            background: #d1d0cd;
+            cursor: not-allowed;
+        }
+
+        .no-versions {
+            text-align: center;
+            padding: 40px 20px;
+            color: #9b9a97;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -862,6 +936,7 @@
                 <h1>Tax Automation Pendo Planner</h1>
                 <div class="header-actions">
                     <button class="btn btn-secondary" onclick="addNewMetric()">+ Add Metric</button>
+                    <button class="btn btn-secondary" onclick="showVersionHistory()">⏱️ History</button>
                     <button class="btn btn-secondary" onclick="resetData()">Reset</button>
                     <button class="btn btn-primary" onclick="exportData()">Export</button>
                 </div>
@@ -960,6 +1035,20 @@
         </div>
     </div>
 
+    <div class="modal" id="versionHistoryModal" onclick="closeModalOnBackdrop(event)">
+        <div class="modal-content">
+            <button class="modal-close-btn" onclick="closeVersionHistoryModal()" title="Close">✕</button>
+            <div class="modal-header">⏱️ Version History</div>
+            <div class="modal-body">
+                <p style="margin-bottom: 16px; color: #6b6b6b;">Restore your planner to a previous state. Snapshots are saved automatically.</p>
+                <div id="versionHistoryList" style="max-height: 400px; overflow-y: auto;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeVersionHistoryModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <div class="undo-toast" id="undoToast">
         <span class="undo-toast-message" id="undoMessage"></span>
         <button class="undo-btn" onclick="undoDelete()">Undo</button>
@@ -987,6 +1076,7 @@
         const database = firebase.database();
         const metricsRef = database.ref('metrics');
         const columnsRef = database.ref('columnWidths');
+        const versionsRef = database.ref('versions');
     </script>
 
     <script>
@@ -1101,6 +1191,8 @@
         let undoTimeout = null;
         let isLoadingFromFirebase = false;
         let saveDebounceTimeout = null;
+        let lastSnapshotTime = 0;
+        const SNAPSHOT_INTERVAL = 5 * 60 * 1000; // 5 minutes between auto-snapshots
 
         // Load data from Firebase with real-time sync
         function loadData() {
@@ -1137,6 +1229,13 @@
                 console.error('Error saving to Firebase:', error);
                 alert('Failed to save data. Please check your connection.');
             });
+
+            // Auto-create snapshots every 5 minutes
+            const now = Date.now();
+            if (now - lastSnapshotTime > SNAPSHOT_INTERVAL) {
+                createSnapshot('Auto-save');
+                lastSnapshotTime = now;
+            }
         }
 
         // Debounced save for textarea inputs (prevents too many saves while typing)
@@ -1147,6 +1246,38 @@
             saveDebounceTimeout = setTimeout(() => {
                 saveData();
             }, 500); // Save 500ms after user stops typing
+        }
+
+        // Create a snapshot of current data
+        function createSnapshot(label = 'Manual save') {
+            const snapshot = {
+                timestamp: Date.now(),
+                label: label,
+                data: JSON.parse(JSON.stringify(metricsData)), // Deep copy
+                metricsCount: metricsData.length
+            };
+
+            versionsRef.push(snapshot).catch(error => {
+                console.error('Error saving snapshot:', error);
+            });
+
+            // Keep only last 50 versions to avoid storage bloat
+            versionsRef.once('value', (snapshot) => {
+                const versions = snapshot.val();
+                if (versions) {
+                    const versionKeys = Object.keys(versions);
+                    if (versionKeys.length > 50) {
+                        // Sort by timestamp and remove oldest
+                        const sortedKeys = versionKeys.sort((a, b) =>
+                            versions[a].timestamp - versions[b].timestamp
+                        );
+                        const toDelete = sortedKeys.slice(0, versionKeys.length - 50);
+                        toDelete.forEach(key => {
+                            versionsRef.child(key).remove();
+                        });
+                    }
+                }
+            });
         }
 
         function parseDate(dateStr) {
@@ -1615,15 +1746,6 @@
             }
         }
 
-        document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape') {
-                const modal = document.getElementById('exportModal');
-                if (modal.classList.contains('active')) {
-                    closeModal();
-                }
-            }
-        });
-
         function copyToClipboard() {
             const content = document.getElementById('exportContent').textContent;
             navigator.clipboard.writeText(content).then(() => {
@@ -1728,6 +1850,126 @@
                 }
             });
         }
+
+        // Show version history modal
+        function showVersionHistory() {
+            const modal = document.getElementById('versionHistoryModal');
+            const listDiv = document.getElementById('versionHistoryList');
+
+            listDiv.innerHTML = '<div style="text-align: center; padding: 20px; color: #9b9a97;">Loading versions...</div>';
+            modal.classList.add('active');
+
+            versionsRef.orderByChild('timestamp').once('value', (snapshot) => {
+                const versions = snapshot.val();
+
+                if (!versions || Object.keys(versions).length === 0) {
+                    listDiv.innerHTML = '<div class="no-versions">No saved versions yet. Versions are saved automatically every 5 minutes.</div>';
+                    return;
+                }
+
+                // Convert to array and sort by timestamp (newest first)
+                const versionArray = Object.keys(versions).map(key => ({
+                    id: key,
+                    ...versions[key]
+                })).sort((a, b) => b.timestamp - a.timestamp);
+
+                let html = '';
+                versionArray.forEach((version, index) => {
+                    const date = new Date(version.timestamp);
+                    const timeAgo = getTimeAgo(version.timestamp);
+                    const isCurrent = index === 0;
+
+                    html += `
+                        <div class="version-item">
+                            <div class="version-item-header">
+                                <div>
+                                    <div class="version-timestamp">
+                                        ${date.toLocaleString('en-US', {
+                                            month: 'short',
+                                            day: 'numeric',
+                                            year: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                        })}
+                                        ${isCurrent ? '<span class="version-current">Current</span>' : ''}
+                                    </div>
+                                    <div class="version-info">
+                                        ${timeAgo} • ${version.metricsCount} metrics • ${version.label}
+                                    </div>
+                                </div>
+                                <button class="btn-restore"
+                                        onclick="restoreVersion('${version.id}')"
+                                        ${isCurrent ? 'disabled' : ''}>
+                                    ${isCurrent ? 'Current' : 'Restore'}
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                listDiv.innerHTML = html;
+            });
+        }
+
+        // Get human-readable time ago
+        function getTimeAgo(timestamp) {
+            const seconds = Math.floor((Date.now() - timestamp) / 1000);
+
+            if (seconds < 60) return 'Just now';
+            if (seconds < 3600) return Math.floor(seconds / 60) + ' minutes ago';
+            if (seconds < 86400) return Math.floor(seconds / 3600) + ' hours ago';
+            if (seconds < 2592000) return Math.floor(seconds / 86400) + ' days ago';
+            return Math.floor(seconds / 2592000) + ' months ago';
+        }
+
+        // Restore a specific version
+        function restoreVersion(versionId) {
+            if (!confirm('Are you sure you want to restore this version? Your current state will be saved as a snapshot before restoring.')) {
+                return;
+            }
+
+            // Save current state before restoring
+            createSnapshot('Before restore');
+
+            // Get the version data
+            versionsRef.child(versionId).once('value', (snapshot) => {
+                const version = snapshot.val();
+                if (version && version.data) {
+                    metricsData = JSON.parse(JSON.stringify(version.data)); // Deep copy
+                    saveData();
+                    renderTable();
+                    closeVersionHistoryModal();
+
+                    // Show success message
+                    alert('Version restored successfully!');
+                }
+            });
+        }
+
+        // Close version history modal
+        function closeVersionHistoryModal() {
+            document.getElementById('versionHistoryModal').classList.remove('active');
+        }
+
+        // Update closeModal to handle both modals
+        function closeModal() {
+            document.getElementById('exportModal').classList.remove('active');
+            document.getElementById('copySuccess').style.display = 'none';
+        }
+
+        // Update keyboard handler to close any open modal
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                const exportModal = document.getElementById('exportModal');
+                const versionModal = document.getElementById('versionHistoryModal');
+                if (exportModal.classList.contains('active')) {
+                    closeModal();
+                }
+                if (versionModal.classList.contains('active')) {
+                    closeVersionHistoryModal();
+                }
+            }
+        });
 
         loadData();
         loadColumnWidths();
