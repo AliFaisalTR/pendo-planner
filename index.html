@@ -937,7 +937,7 @@
                 <div class="header-actions">
                     <button class="btn btn-secondary" onclick="addNewMetric()">+ Add Metric</button>
                     <button class="btn btn-secondary" onclick="showVersionHistory()">⏱️ History</button>
-                    <button class="btn btn-secondary" onclick="resetData()">Reset</button>
+                    <button class="btn btn-secondary" onclick="resetData()">🔄 Reset to Original</button>
                     <button class="btn btn-primary" onclick="exportData()">Export</button>
                 </div>
             </div>
@@ -1757,11 +1757,16 @@
         }
 
         function resetData() {
-            if (confirm('Are you sure you want to reset all data to initial values? This cannot be undone.')) {
-                localStorage.removeItem('pendoPlannerData');
-                localStorage.removeItem('pendoPlannerNotes');
-                loadData();
+            if (confirm('Are you sure you want to reset all data to the original 8 metrics? Your current state will be saved as a snapshot first.')) {
+                // Save current state before resetting
+                createSnapshot('Before reset');
+
+                // Reset to initial data
+                metricsData = JSON.parse(JSON.stringify(initialData));
+                saveData();
                 renderTable();
+
+                alert('Data has been reset to original state. You can restore your previous version from History if needed.');
             }
         }
 
