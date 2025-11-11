@@ -1100,6 +1100,7 @@
         let deletedMetric = null;
         let undoTimeout = null;
         let isLoadingFromFirebase = false;
+        let saveDebounceTimeout = null;
 
         // Load data from Firebase with real-time sync
         function loadData() {
@@ -1136,6 +1137,16 @@
                 console.error('Error saving to Firebase:', error);
                 alert('Failed to save data. Please check your connection.');
             });
+        }
+
+        // Debounced save for textarea inputs (prevents too many saves while typing)
+        function debouncedSaveData() {
+            if (saveDebounceTimeout) {
+                clearTimeout(saveDebounceTimeout);
+            }
+            saveDebounceTimeout = setTimeout(() => {
+                saveData();
+            }, 500); // Save 500ms after user stops typing
         }
 
         function parseDate(dateStr) {
@@ -1347,7 +1358,7 @@
                         ${metric.areaShort ? `<div class="metric-desc">${metric.areaShort}</div>` : ''}
                     </td>
                     <td>
-                        <textarea onchange="updateMetric(${metric.id}, 'tracking', this.value)">${metric.tracking}</textarea>
+                        <textarea oninput="updateMetric(${metric.id}, 'tracking', this.value, true)" onblur="updateMetric(${metric.id}, 'tracking', this.value, false)">${metric.tracking}</textarea>
                     </td>
                     <td>
                         <input type="date" value="${formatDateForInput(metric.setupWindow)}"
@@ -1364,7 +1375,7 @@
                         ` : ''}
                     </td>
                     <td>
-                        <textarea onchange="updateMetric(${metric.id}, 'target', this.value)">${metric.target}</textarea>
+                        <textarea oninput="updateMetric(${metric.id}, 'target', this.value, true)" onblur="updateMetric(${metric.id}, 'target', this.value, false)">${metric.target}</textarea>
                     </td>
                     <td>
                         <span class="blackout-badge ${inBlackout ? 'blackout-yes' : 'blackout-no'}">
@@ -1392,7 +1403,7 @@
                         </select>
                     </td>
                     <td>
-                        <textarea onchange="updateMetric(${metric.id}, 'notes', this.value)">${metric.notes}</textarea>
+                        <textarea oninput="updateMetric(${metric.id}, 'notes', this.value, true)" onblur="updateMetric(${metric.id}, 'notes', this.value, false)">${metric.notes}</textarea>
                     </td>
                 `;
 
@@ -1403,11 +1414,20 @@
             renderCalendar();
         }
 
-        function updateMetric(id, field, value) {
+        function updateMetric(id, field, value, isTyping = false) {
             const metric = metricsData.find(m => m.id === id);
             if (metric) {
                 metric[field] = value;
-                saveData();
+
+                // Use debounced save for text inputs while typing
+                if (isTyping) {
+                    debouncedSaveData();
+                } else {
+                    // Immediate save for blur events and non-text inputs
+                    saveData();
+                }
+
+                // Only re-render for fields that affect the UI display
                 if (field === 'setupWindow' || field === 'captureStart' || field === 'status' || field === 'taskType') {
                     // Save textarea heights before re-rendering
                     saveTextareaHeights();
@@ -1423,10 +1443,12 @@
             const heights = {};
             textareas.forEach((textarea, index) => {
                 if (textarea.style.height) {
-                    // Get the metric ID and field from the onchange attribute
+                    // Get the metric ID and field from the oninput or onchange attribute
+                    const oninput = textarea.getAttribute('oninput');
                     const onchange = textarea.getAttribute('onchange');
-                    if (onchange) {
-                        const match = onchange.match(/updateMetric\((\d+),\s*'(\w+)'/);
+                    const attrValue = oninput || onchange;
+                    if (attrValue) {
+                        const match = attrValue.match(/updateMetric\((\d+),\s*'(\w+)'/);
                         if (match) {
                             const key = `${match[1]}_${match[2]}`;
                             heights[key] = textarea.style.height;
@@ -1443,9 +1465,11 @@
                 const heights = JSON.parse(saved);
                 const textareas = document.querySelectorAll('textarea');
                 textareas.forEach(textarea => {
+                    const oninput = textarea.getAttribute('oninput');
                     const onchange = textarea.getAttribute('onchange');
-                    if (onchange) {
-                        const match = onchange.match(/updateMetric\((\d+),\s*'(\w+)'/);
+                    const attrValue = oninput || onchange;
+                    if (attrValue) {
+                        const match = attrValue.match(/updateMetric\((\d+),\s*'(\w+)'/);
                         if (match) {
                             const key = `${match[1]}_${match[2]}`;
                             if (heights[key]) {
